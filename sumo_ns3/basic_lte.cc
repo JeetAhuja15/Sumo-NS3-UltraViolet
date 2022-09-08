@@ -41,13 +41,13 @@ void ThroughputMonitor (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon,Gn
       std::cout<< "Total{Jitter}: " << (stats->second.jitterSum.GetSeconds()) << "\n";
       std::cout<< "Lost Packets: " << (stats->second.lostPackets) << "\n";
       std::cout<< "Dropped Packets: " << (stats->second.packetsDropped.size()) << "\n";
-      localThrou=(stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024);
-      // updata gnuplot data
+      localThrou=(stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstTxPacket.GetSeconds())/1024);  
+	// updata gnuplot data
             DataSet.Add((double)Simulator::Now().GetSeconds(),(double) localThrou);
       std::cout<<"---------------------------------------------------------------------------"<<std::endl;
       }
     }
-      Simulator::Schedule(Seconds(1 ),&ThroughputMonitor, fmhelper, flowMon,DataSet);
+      Simulator::Schedule(Seconds (0.2),&ThroughputMonitor, fmhelper, flowMon,DataSet);
       {
   flowMon->SerializeToXmlFile ("ThroughputMonitor.xml", true, true);
       }
@@ -57,9 +57,15 @@ void ThroughputMonitor (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon,Gn
 int main (int argc, char *argv[])
 {
 
-  uint16_t numofUes = 1;
-  uint16_t numofEnbs = 2;
-  Time simTime = MilliSeconds (10000);
+  uint16_t numofUes = 2;
+  uint16_t numofEnbs = 4;
+  Time simTime = Seconds(1.0);
+  double distance = 100.0;
+  Config::SetDefault ("ns3::UdpClient::Interval", TimeValue (MilliSeconds (10)));//20
+  Config::SetDefault ("ns3::UdpClient::MaxPackets", UintegerValue (1000000));
+  Config::SetDefault ("ns3::LteEnbRrc::SrsPeriodicity", UintegerValue(320)); //comment running const vel mobility
+  Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (true));
+
 
   // To use EPC with LTE  
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
@@ -101,47 +107,51 @@ int main (int argc, char *argv[])
   NodeContainer enbNodes;
   enbNodes.Create (numofEnbs);
   ueNodes.Create (numofUes);
+  
+ // Ptr<Node> enb = enbNodes.Get(0);
+  //internet.Install (enbNodes);
+
 
   // Installing Mobility for the EnBs
-  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();        
-  for (uint16_t i = 0; i<numofEnbs; i++)
-  {
-     // X,Y co-ordinates for real-life LTE Towers --> (273.890279027517, 127.135688700248) (124.842975830659, 125.632829552051) (1005.28760875657, 1502.71367422282) (1046.76811661676, 1611.70460214559)
-     if (i==0){
-       //positionAlloc->Add (Vector (1005.28760875657, 1502.71367422282, 0));
-	positionAlloc->Add (Vector (100, 0 ,0));
-     }
-     else {
-       //int j=0;
-	positionAlloc->Add (Vector (0, 100,0));
-//       positionAlloc->Add (Vector  (1046.76811661676, 1611.70460214559, 0));
-     }
-  }
-
-  MobilityHelper mobility;
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  for (uint16_t i = 0; i < numofEnbs; i++)
+    if (i<2)
+      {
+        positionAlloc->Add (Vector (distance * 2 * i - distance, 0, 0));//Vector (distance * 2 * i - distance, 0, 0)
+      }
+    else
+      { int j=0;
+        positionAlloc->Add (Vector (0, distance * 2 * j - distance, 0));//Vector (distance * 2 * i - distance, 0, 0)
+        j=j+1;
+      }  
+  MobilityHelper mobility; 
   mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobility.SetPositionAllocator (positionAlloc);
   mobility.Install (enbNodes);
   
-
+ 
   // Installing Mobility for UEs
-  /*Ptr<ListPositionAllocator> uepositionAlloc = CreateObject<ListPositionAllocator> ();
-  for (uint16_t i = 0; i<numofUes; i++)
-  { 
-    positionAlloc->Add (Vector (1424.22, 1658.15, 0));
-  }*/
-  mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
+  //positionAlloc->Add (Vector (100, 100,0));
+ // mobility.SetPositionAllocator (positionAlloc);
+  //mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+   // MobilityHelper uemobility;
+    mobility.SetPositionAllocator ("ns3::GridPositionAllocator",
                                  "MinX", DoubleValue (-50.0),
                                  "MinY", DoubleValue (50.0),
                                  "DeltaX", DoubleValue (10.0),
                                  "DeltaY", DoubleValue (10.0),
                                  "GridWidth", UintegerValue (5),
                                  "LayoutType", StringValue ("RowFirst"));
+  mobility.SetMobilityModel ("ns3::RandomWalk2dMobilityModel",
+                             "Mode", StringValue ("Time"),
+                              "Time", StringValue ("1s"),
+                             "Speed", StringValue ("ns3::ConstantRandomVariable[Constant=200.0]"),
+                             "Bounds", RectangleValue (Rectangle (-600, 600, -600, 600))); 
   
-  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-//  mobility.SetPositionAllocator (positionAlloc);
+
+  //mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobility.Install (ueNodes);
-  
+
 
   // Install LTE protocol stack on enBs and UEs
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
@@ -149,16 +159,18 @@ int main (int argc, char *argv[])
   
   // Install IP Stack on UEs
   internet.Install (ueNodes);
-  
+
   Ipv4InterfaceContainer ueIpIfaces;
   ueIpIfaces = epcHelper->AssignUeIpv4Address (NetDeviceContainer (ueLteDevs));
 
   // Attach UE to closest enB
   lteHelper->AttachToClosestEnb (ueLteDevs, enbLteDevs);
 
+
   // Set default gateway for the UE
   for (uint32_t u = 0; u < numofUes; ++u){
     Ptr<Node> ue = ueNodes.Get (u);
+    Ptr<Node> enb = enbNodes.Get (0);
     Ptr<Ipv4StaticRouting> ueStaticRouting;
     ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ue->GetObject<Ipv4> ());
     ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
@@ -182,7 +194,7 @@ int main (int argc, char *argv[])
 
   Simulator::Stop (simTime);
   AnimationInterface anim ("my_lte_basic.xml");
-  //anim.SetMobilityPollInterval(Seconds(1));
+  anim.SetMobilityPollInterval(Seconds(1));
      
      std::string fileNameWithNoExtension = "FlowVSThroughput_";
      std::string graphicsFileName        = fileNameWithNoExtension + ".png";
@@ -211,11 +223,11 @@ int main (int argc, char *argv[])
     // call the flow monitor function
     ThroughputMonitor(&fmHelper, allMon, dataset);
 
-    // trace file, for data extraction
+   /* // trace file, for data extraction
     AsciiTraceHelper ascii;
     p2ph.EnableAsciiAll (ascii.CreateFileStream ("tracehandover.tr"));
     MobilityHelper::EnableAscii (ascii.CreateFileStream ("lena-x2-handover.mob"), ueNodes); //correct for a set of nodes
-
+   */
 
     //Gnuplot ...continued
     gnuplot.AddDataset (dataset);

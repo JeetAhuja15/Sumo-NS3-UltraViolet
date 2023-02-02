@@ -15,4 +15,6 @@ Phase-3:
   2. Observe the bandwith + latency using "iperf + ping" commands
  
      
-    
+  if(stats->first == 380){
+        outdata << 64 << ","<<  count << "," <<stats->second.rxBytes * 8.0 / (stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstRxPacket.GetSeconds())/1000 <<  "," <<(stats->second.delaySum.GetSeconds()/stats->second.rxPackets)*1000 <<std::endl;  
+      }
